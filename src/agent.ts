@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { mkdir, appendFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { BrowserDriver, type Observation } from './browser.js';
+import { checkSelection, type RecordSource } from './records.js';
 import { Model } from './model.js';
 import { publicUrl } from './schema.js';
 export type Result = {status:'succeeded'|'blocked'|'failed'|'cancelled';summary:string;runDir:string;data?:unknown};
@@ -13,6 +14,7 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
   await mkdir(runDir,{recursive:true});
   const driver=new BrowserDriver();
   const history:any[]=[];
+  const recordSources:RecordSource[]=[];
   let result:Result={status:'failed',summary:'Step limit reached without verified completion',runDir};
   const deadline=Date.now()+Number(process.env.MAX_MINUTES||10)*60000;
   const signal=AbortSignal.any([AbortSignal.timeout(Math.max(1000,deadline-Date.now())),...(hooks.signal?[hooks.signal]:[])]);
@@ -29,7 +31,8 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
       signal.throwIfAborted();
       const observation=await driver.observe(path.join(runDir,`${String(step).padStart(3,'0')}.png`));
       await log({step,observation});
-      const decision=await model.decide({goal,observation,history:history.slice(-16)},signal);
+      if(observation.collections.length)recordSources.push({step,url:observation.url,collections:observation.collections});
+      const decision=await model.decide({goal,step,observation,recordSources,history:history.slice(-16)},signal);
       const action=decision.action;
       await log({step,decision});
       await notify(`Step ${step+1}: ${decision.reason}`,observation.screenshot);
@@ -46,7 +49,11 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
         const checks=await driver.verify(action,observation);
         await log({step,checks});
         if(checks.every(c=>c.passed)) {
-          const audit=await model.verifyGoal({goal,observation,history:history.slice(-16),claim:action},signal);
+          const selectionCheck=action.selection?checkSelection(action.selection,action.data,recordSources):undefined;
+          await log({step,selectionCheck});
+          if(selectionCheck&&!selectionCheck.passed){history.push({action,error:selectionCheck.reason});continue;}
+
+          const audit=await model.verifyGoal({goal,observation,recordSources,selectionCheck,history:history.slice(-16),claim:action},signal);
           await log({step,audit});
           if(audit.verdict==='succeeded') {result={status:'succeeded',summary:action.summary,data:action.data,runDir};break;}
           if(audit.verdict==='blocked') {result={status:'blocked',summary:audit.reason,runDir};break;}

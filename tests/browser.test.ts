@@ -27,5 +27,16 @@ test('discovers controls, fills, verifies evidence, waits for dynamic content, a
     await driver.page.getByText('Revealed',{exact:true}).waitFor();
     observation=await driver.observe(path.join(dir,'after.png'));
     assert.ok(observation.text.includes('Revealed'));
+    await driver.page.setContent('<div role="table"><div role="row"><div role="columnheader">Name</div><div role="columnheader">Job Title</div></div><div role="row"><div role="cell">First Person</div><div role="cell"></div></div><div role="row"><div role="cell">Later Person</div><div role="cell">Engineer</div></div></div><section><article><h3><a title="Full Book Name">Full Book…</a></h3><p>£20.00</p></article><article><h3><a title="Cheap Book">Cheap Book</a></h3><p>£5.00</p></article></section>');
+    observation=await driver.observe(path.join(dir,'records.png'));
+    const table=observation.collections.find(c=>c.kind==='table')!;
+    assert.deepEqual(table.headers,['Name','Job Title']);
+    assert.deepEqual(table.rows,[{index:1,cells:['First Person','']},{index:2,cells:['Later Person','Engineer']}]);
+    const cards=observation.collections.find(c=>c.kind==='cards')!;
+    assert.deepEqual(cards.rows[0].cells.slice(0,2),['Full Book Name','£20.00']);
+    assert.deepEqual(cards.rows[1].cells.slice(0,2),['Cheap Book','£5.00']);
+    await driver.page.setContent('<div><div><a><div>Item A</div></a><div>Description A</div><div>$20.00</div><button>Add</button></div><div><a><div>Item B</div></a><div>Description B</div><div>$5.00</div><button>Add</button></div></div>');
+    observation=await driver.observe(path.join(dir,'div-cards.png'));
+    assert.deepEqual(observation.collections.find(c=>c.kind==='cards')!.rows[1].cells.slice(0,2),['Item B','$5.00']);
   } finally {await driver.close(path.join(dir,'trace.zip'));}
 });

@@ -1,6 +1,7 @@
 import { chromium, type Browser, type Page, type Locator } from 'playwright';
+import type { Collection } from './records.js';
 import { Action, publicUrl } from './schema.js';
-export type Observation = {url:string;title:string;text:string;elements:any[];screenshot:string};
+export type Observation = {url:string;title:string;text:string;elements:any[];collections:Collection[];screenshot:string};
 export class BrowserDriver {
   browser!: Browser; page!: Page; private targets = new Map<string,Locator>();
   async start(url: string) {
@@ -20,10 +21,56 @@ export class BrowserDriver {
     }
   }
   async observe(screenshot: string): Promise<Observation> {
+    for(let attempt=0;attempt<3;attempt++) {
+      try{return await this.captureObservation(screenshot);}
+      catch(error){
+        if(attempt===2||!/Execution context was destroyed|Cannot find context|Frame was detached/.test(String(error)))throw error;
+        await this.page.waitForLoadState('domcontentloaded',{timeout:3000}).catch(()=>{});
+        await this.page.waitForTimeout(300);
+      }
+    }
+    throw new Error('Unable to observe a stable page');
+  }
+  private async captureObservation(screenshot:string):Promise<Observation> {
     // IDs are regenerated each observation. Element handles are resolved before acting.
     this.targets.clear();
     const elements:any[] = [];
+    const collections:Collection[]=[];
     for (const [frameIndex, frame] of this.page.frames().entries()) {
+      const groups=await frame.evaluate(() => {
+        const {visible,text}={visible(el:Element){const r=el.getBoundingClientRect();const s=getComputedStyle(el);return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none';},text(el:Element){return (el as HTMLElement).innerText?.replace(/\s+/g,' ').trim()||'';}};
+        const result:{kind:'table'|'cards';headers:string[];rows:{index:number;cells:string[]}[];truncated:boolean}[]=[];
+        for(const table of document.querySelectorAll('table,[role="table"],[role="grid"]')) {
+          if(!visible(table))continue;
+          const allRows=Array.from(table.querySelectorAll('tr,[role="row"]')).filter(r=>visible(r)&&r.closest('table,[role="table"],[role="grid"]')===table);
+          let headers:string[]=[];const rows:{index:number;cells:string[]}[]=[];
+          for(const row of allRows) {
+            const cells=Array.from(row.querySelectorAll('th,td,[role="columnheader"],[role="cell"],[role="gridcell"]')).filter(c=>c.closest('tr,[role="row"]')===row);
+            if(!cells.length)continue;
+            if(cells.some(c=>c.matches('th,[role="columnheader"]'))){headers=cells.map(text);continue;}
+            // Empty cells must keep their position; never filter by cell text.
+            rows.push({index:rows.length+1,cells:cells.map(text)});
+          }
+          if(rows.length)result.push({kind:'table',headers,rows:rows.slice(0,100),truncated:rows.length>100});
+        }
+        // Generic repeated product cards: no site-specific selectors or price order assumptions.
+        const price=/[$£€]\s*\d[\d,]*(?:\.\d+)?/g;
+        const candidates=Array.from(document.querySelectorAll('body *')).filter(el=>!el.closest('table,[role="table"],[role="grid"]')).map(parent=>{
+          const children=Array.from(parent.children).filter(el=>visible(el)&&el.querySelector('a,button')&&(text(el).match(price)||[]).length===1);
+          return {parent,children};
+        }).filter(g=>g.children.length>=2);
+        for(const group of candidates.filter(g=>!candidates.some(other=>other!==g&&g.children.some(c=>c.contains(other.parent))))) {
+          const rows=group.children.map((el,i)=>{
+            const heading=el.querySelector('h1,h2,h3,h4,h5,h6');
+            const link=heading?.querySelector('a')||el.querySelector('a[title]')||Array.from(el.querySelectorAll('a')).find(a=>text(a));
+            const title=link?.getAttribute('title')|| (heading?text(heading):link?text(link):'');
+            return {index:i+1,cells:[title,(text(el).match(price)||[''])[0],text(el)]};
+          });
+          result.push({kind:'cards',headers:['Title','Price','Text'],rows:rows.slice(0,100),truncated:rows.length>100});
+        }
+        return result;
+      });
+      for(const group of groups)collections.push({...group,id:`g${collections.length}`,frame:frameIndex});
       const items = await frame.evaluate(() => {
         document.querySelectorAll('[data-web-agent-id]').forEach(e=>e.removeAttribute('data-web-agent-id'));
         const candidates = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role="button"],[role="link"],[contenteditable="true"],[tabindex]'));
@@ -41,7 +88,7 @@ export class BrowserDriver {
       }
     }
     await this.page.screenshot({path:screenshot,fullPage:false});
-    return {url:this.page.url(),title:await this.page.title(),text:(await this.page.locator('body').innerText()).slice(0,24000),elements,screenshot};
+    return {url:this.page.url(),title:await this.page.title(),text:(await this.page.locator('body').innerText()).slice(0,24000),elements,collections,screenshot};
   }
   target(id:string) { const el=this.targets.get(id);if(!el)throw new Error('Unknown or stale element ID');return el; }
   async act(action: Action) {
