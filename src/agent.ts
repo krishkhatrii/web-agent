@@ -2,15 +2,18 @@ import 'dotenv/config';
 import { mkdir, appendFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { BrowserDriver, type Observation } from './browser.js';
-import { checkSelection, type RecordSource } from './records.js';
+import { checkCompletionSelection, type RecordSource } from './records.js';
 import { ReadinessBudget } from './readiness.js';
+import {summarizeCalls,type ModelCall} from './metrics.js';
 import { Model } from './model.js';
 import { publicUrl } from './schema.js';
-export type Result = {status:'succeeded'|'blocked'|'failed'|'cancelled';summary:string;runDir:string;data?:unknown};
+export type Result = {status:'succeeded'|'blocked'|'failed'|'cancelled';summary:string;runDir:string;data?:unknown;metrics?:ReturnType<typeof summarizeCalls>};
 export type Hooks = {progress?:(message:string,screenshot?:string)=>Promise<void>;ask?:(question:string)=>Promise<string>;signal?:AbortSignal};
 export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Result> {
   publicUrl(url);
-  const model=new Model();
+  const started=performance.now();
+  let steps=0,activeStep=-1;
+  const calls:ModelCall[]=[];
   const runDir=path.resolve('runs',new Date().toISOString().replace(/[:.]/g,'-'));
   await mkdir(runDir,{recursive:true});
   const driver=new BrowserDriver();
@@ -25,16 +28,19 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
     try{await hooks.progress?.(message,screenshot);}catch{console.warn('Progress delivery failed; local run artifacts retained');}
   };
   const log=async(event:unknown)=>appendFile(path.join(runDir,'events.jsonl'),JSON.stringify({at:new Date().toISOString(),...event as object})+'\n');
+  const model=new Model(undefined,undefined,async call=>{calls.push(call);await log({step:activeStep,modelCall:call});});
   try {
     await driver.start(url);
     await notify('Browser launched. Starting task.');
     let repeats=0;let previous='';
     for(let step=0;step<Number(process.env.MAX_STEPS||45);step++) {
       signal.throwIfAborted();
+      activeStep=step;
       const observation=await driver.observe(path.join(runDir,`${String(step).padStart(3,'0')}.png`));
       await log({step,observation});
       if(observation.collections.length)recordSources.push({step,url:observation.url,collections:observation.collections});
       const decision=await model.decide({goal,step,observation,recordSources,history:history.slice(-16),readiness:{waitsUsed:readiness.used,waitLimit:3,waitMilliseconds:2000}},signal);
+      steps++;
       const policy=readiness.apply(decision.action,observation.elements);
       const action=policy.action;
       await log({step,decision});
@@ -50,13 +56,15 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
         history.push({question:action.question,answer}); continue;
       }
       if(action.type==='finish') {
+        const selectionCheck=checkCompletionSelection(goal,action,recordSources);
+        await log({step,selectionCheck});
+        if(!selectionCheck.passed){
+          result={status:'failed',summary:`Not verified: ${selectionCheck.reason}`,runDir};
+          break;
+        }
         const checks=await driver.verify(action,observation);
         await log({step,checks});
         if(checks.every(c=>c.passed)) {
-          const selectionCheck=action.selection?checkSelection(action.selection,action.data,recordSources):undefined;
-          await log({step,selectionCheck});
-          if(selectionCheck&&!selectionCheck.passed){history.push({action,error:selectionCheck.reason});continue;}
-
           const audit=await model.verifyGoal({goal,observation,recordSources,selectionCheck,history:history.slice(-16),claim:action},signal);
           await log({step,audit});
           if(audit.verdict==='succeeded') {result={status:'succeeded',summary:action.summary,data:action.data,runDir};break;}
@@ -72,6 +80,7 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
     result={status:hooks.signal?.aborted?'cancelled':'failed',summary:signal.aborted?'Task cancelled or time limit reached':error instanceof Error?error.message:'Task failed',runDir};
   } finally {
     await driver.close(path.join(runDir,'trace.zip')).catch(()=>{});
+    result.metrics=summarizeCalls(calls,process.env.OPENROUTER_MODEL!,steps,Math.round(performance.now()-started));
     await writeFile(path.join(runDir,'result.json'),JSON.stringify(result,null,2));
   }
   await notify(`${result.status.toUpperCase()}: ${result.summary}`);

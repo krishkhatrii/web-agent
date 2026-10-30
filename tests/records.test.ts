@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {checkSelection,parseNumber,parseDate,type RecordSource,type Selection} from '../src/records.js';
+import {checkCompletionSelection,requiredSelectionOrder,checkSelection,parseNumber,parseDate,type RecordSource,type Selection} from '../src/records.js';
 const sources:RecordSource[]=[{step:7,url:'https://example.com/list',collections:[{id:'g0',kind:'table',frame:0,headers:['Name','Job Title','Price'],rows:[{index:1,cells:['First Person','','£20.00']},{index:2,cells:['Later Person','Engineer','£5.00']}],truncated:false}]}];
 const selection:Selection={step:7,collection:'g0',row:1,order:{op:'position',position:1},fields:{name:[0],job_title:[1]}};
 test('first record preserves empty fields; a populated later row cannot replace it',()=>{
@@ -65,4 +65,15 @@ test('ambiguous numeric dates and impossible calendar dates remain unparseable',
     assert.equal(parseDate(raw),null,raw);
     assert.equal(comparison(['2026-01-01',raw],'max','date',1).passed,false,raw);
   }
+});
+
+test('completion gate requires proof even without observed collections and rejects operation bypasses',()=>{
+  const finish={type:'finish' as const,summary:'Done',evidence:[{kind:'text' as const,expected:'Done'}]};
+  for(const goal of ['Find the cheapest book on the first page','Read the first employee','Get the latest invoice','Get the most expensive item','Get the earliest record']) {
+    assert.equal(checkCompletionSelection(goal,finish,[]).passed,false,goal);
+  }
+  assert.equal(checkCompletionSelection('Find the cheapest item',{...finish,selection,data:{name:'First Person',job_title:null}},sources).passed,false);
+  assert.equal(checkCompletionSelection('Read the first employee',{...finish,selection,data:{name:'First Person',job_title:null}},sources).passed,true);
+  assert.equal(checkCompletionSelection('Fill first name and last name',finish,[]).passed,true);
+  assert.equal(requiredSelectionOrder('Read the first catalogue page'),null);
 });

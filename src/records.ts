@@ -85,3 +85,24 @@ export function checkSelection(selection:Selection,data:Record<string,unknown>|u
   }
   return {passed:true,reason:'Record selection and mapped output fields match observed cells',source:{step:source.step,url:source.url,collection:collection.id,headers:collection.headers,row}};
 }
+
+// Code-owned requirements for explicit English selection goals. Scope phrases such as
+// "first page" and form labels such as "first name" are not record selectors.
+export function requiredSelectionOrder(goal:string):Selection['order']|null {
+  const text=goal.toLowerCase().replace(/\bfirst\s+(?:(?:catalogue|catalog|results?)\s+)?page\b/g,'page').replace(/\b(?:first|last)\s+name\b/g,'name');
+  if(/\b(?:cheapest|least expensive|lowest[- ]priced|lowest price)\b/.test(text))return {op:'min',column:0,valueType:'number'};
+  if(/\b(?:most expensive|highest[- ]priced|highest price)\b/.test(text))return {op:'max',column:0,valueType:'number'};
+  if(/\b(?:latest|newest|most recent)\b/.test(text))return {op:'max',column:0,valueType:'date'};
+  if(/\b(?:earliest|oldest)\b/.test(text))return {op:'min',column:0,valueType:'date'};
+  if(/\bfirst\b/.test(text))return {op:'position',position:1};
+  return null;
+}
+export function checkCompletionSelection(goal:string,action:Extract<Action,{type:'finish'}>,sources:RecordSource[]) {
+  const required=requiredSelectionOrder(goal);
+  if(required&&!action.selection)return {passed:false,required:true,reason:'Selection proof is required by the goal but is missing'};
+  if(!action.selection)return {passed:true,required:false,reason:'No explicit selection requirement or supplied proof'};
+  const order=action.selection.order;
+  if(required&&(order.op!==required.op||(required.op==='position'?(order.op!=='position'||order.position!==required.position):(order.op==='position'||order.valueType!==required.valueType))))
+    return {passed:false,required:true,reason:'Selection operation does not match the goal; position cannot replace a required minimum/maximum'};
+  return {...checkSelection(action.selection,action.data,sources),required:!!required};
+}

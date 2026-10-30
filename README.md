@@ -1,6 +1,8 @@
 # Web Task Agent
 
-A goal-driven browser agent controlled from a CLI or Telegram. Each task launches a fresh Chromium browser, observes visible page text and interactive controls, chooses one validated action, then observes again. There are no target-site selector scripts in the runtime.
+A goal-driven browser agent controlled from a CLI or Telegram. Each task launches a fresh Chromium browser, observes the page, chooses a validated action, executes it and checks the result. Runtime actions use controls discovered from the current page, with no target-site selector scripts.
+
+Development history, original failures, fixes and presentation evidence are in [NOTES.md](NOTES.md).
 
 ## Setup
 
@@ -12,58 +14,138 @@ npx playwright install chromium
 cp .env.example .env
 ```
 
-Set `OPENROUTER_API_KEY` and `OPENROUTER_MODEL` in `.env`. The initial development model is `openai/gpt-4.1`; it is configurable. Never include `.env` or the original credential-bearing brief in a submission archive.
+Copy the environment template only for a new setup; preserve an existing `.env`. Configure these variables:
 
-## Run locally
+| Variable | Purpose |
+|---|---|
+| `OPENROUTER_API_KEY` | Required OpenRouter credential |
+| `OPENROUTER_MODEL` | Required model ID; the tested default configuration uses `openai/gpt-4.1` |
+| `TELEGRAM_BOT_TOKEN` | Required only for Telegram mode |
+| `TELEGRAM_ALLOWED_CHAT_ID` | Numeric ID of the only chat permitted to run tasks |
+| `HEADLESS` | `true` by default; `false` shows the browser |
+| `MAX_STEPS` | Task step limit, default 45 |
+| `MAX_MINUTES` | Task time budget, default 10 |
+
+The model ID is configurable, not hardcoded as a fallback. Keep `.env`, dependencies and raw run artifacts out of source control. Do not include `.env` or the original credential-bearing brief in a submission archive.
+
+## Run from the terminal
 
 ```bash
-npm run agent -- https://the-internet.herokuapp.com/inputs "Enter 42 into the number input and verify its value is 42."
+npm run agent -- https://demoqa.com/text-box "Fill full name Demo User, email demo.user@example.com, current address Dubai and permanent address Mumbai. Submit and verify that all four values match the rendered output."
 ```
 
-Supply credentials and form data in the goal when required. The CLI reports blocked if more information is needed; Telegram supports interactive replies. Exit code 0 indicates verified success, 2 indicates an incomplete task, and 1 indicates invalid setup.
+Include credentials and form data in the goal where required. If information is missing, the CLI reports blocked; Telegram supports questions and replies. Exit code 0 indicates verified success, 2 an incomplete/blocked/failed task, and 1 a startup/configuration error.
 
-## Telegram
+To test a different model without changing `.env`:
 
-Create a bot using @BotFather and add its token to `TELEGRAM_BOT_TOKEN`. Set `TELEGRAM_ALLOWED_CHAT_ID` to your numeric chat ID (available from @userinfobot). Only this chat is accepted. Open your bot and press Start, then run:
+```bash
+OPENROUTER_MODEL=openai/gpt-4.1-mini npm run agent -- https://books.toscrape.com/ "Find the cheapest book on the first catalogue page and return its full title and price."
+```
+
+## Run through Telegram
+
+Create a bot using @BotFather. Set its token and your numeric chat ID in `.env` (the chat ID is available from @userinfobot). Open your bot and press Start, then run:
 
 ```bash
 npm run bot
 ```
 
-Send a public sandbox URL and a task in one message. Progress screenshots and the final result are returned to that chat. Reply to clarification questions normally. `/cancel` stops the current task; `/help` shows usage. One task runs at a time. No webhook or hosted server is needed. Keep the laptop awake and the bot process running.
+Send a public sandbox URL and a goal in one message. The bot sends progress screenshots, a final status and extracted data when available. If it asks a question, reply normally in the same chat to resume. `/cancel` requests cancellation; `/help` shows usage. Only the configured chat is accepted, and one task runs at a time. Long polling needs no webhook or hosted server; keep the laptop awake and the process running.
 
-## Architecture
+Telegram task submission, screenshots, waiting for a user reply and resumption have been tested end to end. The bot was stopped after that test; starting the project does not automatically start it.
 
-- `src/browser.ts`: browser lifecycle, generic DOM observation, action execution, evidence checks, Playwright traces.
-- `src/model.ts`: OpenRouter adapter and general planning instructions.
-- `src/schema.ts`: validated action protocol and navigation checks.
-- `src/records.ts`: generic min/max/position selection checks and field mappings against captured rows.
-- `src/agent.ts`: observe, decide, act, verify, recover, stop; shared by both interfaces.
-- `src/telegram.ts`: polling, allowed chat, progress images, questions, replies, cancellation.
+## Project structure
 
-The model receives visible page text and current element IDs. It cannot execute JavaScript or provide arbitrary selectors. The browser executor supports click, fill, select, key press, navigation, scrolling, and bounded waiting. Observations include indexed semantic table rows with aligned headers and preserved empty cells, plus generic repeated product cards with title and price columns. A claimed completion must include observed text, URL, or input-value evidence checked by the executor. Record-selection completions also cite the source observation, collection, row, order operation, and field-to-column mappings. Selection uses `position` with a 1-based ordinal, or `min`/`max` with a comparison column and `number`/`date` value type. These cover first/nth/last, cheapest/most expensive, and earliest/latest without separate domain rules. Deterministic checks reject wrong positions, wrong extrema, tied extrema, unparseable comparison values, mixed units, and output fields that disagree with the selected cells. Empty cells are returned as null. The independent audit checks that the operation, source scope, and semantic column choices match the user request. An independent model audit then checks the full goal against the observation and recent history, and can reject completion or classify it as blocked. Both goal interpretation and the audit still depend on model judgment.
+| File | Responsibility |
+|---|---|
+| `src/cli.ts` | Terminal entry point and exit codes |
+| `src/telegram.ts` | Polling, allowed chat, screenshots, questions/replies and cancellation |
+| `src/agent.ts` | Shared observe/decide/act/verify loop, history, task limits and artifacts |
+| `src/browser.ts` | All production Playwright control: lifecycle, navigation, observation, actions, evidence checks and traces |
+| `src/model.ts` | OpenRouter requests, planning instructions, response validation, completion audit and call telemetry |
+| `src/schema.ts` | Validated action protocol and basic public-URL checks |
+| `src/readiness.ts` | Bounded retry policy for temporarily unavailable controls/pages |
+| `src/records.ts` | Indexed-record verification, number/date parsing, min/max/position and mandatory-proof gate |
+| `src/metrics.ts` | Run-level usage, cost, latency and step summaries |
+| `tests/*.test.ts` | Automated regression tests |
+| `tests/local-fixture.ts` | Transport-only harness serving local HTML at a test URL |
+| `tests/fixtures/` | Immediate and delayed click-blocking cookie overlays |
 
-## Verification and artifacts
+Browser tests and the fixture harness also import Playwright; runtime browser execution is isolated in `src/browser.ts`.
+
+## Observation and verification
+
+The model receives visible DOM text, current element IDs and structured records. Screenshots are saved and sent to Telegram, but are not passed as model image inputs. The model cannot execute JavaScript or supply arbitrary selectors. Supported browser actions include click, fill, select, key press, navigation, back, scroll and bounded wait.
+
+Observations preserve 1-based table row indices, aligned headers/cells and empty fields. Generic repeated product cards expose title, price and text columns. Extracted empty fields are reported as null instead of selecting another populated record.
+
+Selection proofs reference a captured observation, collection, row and field-to-column mappings. They use `position` with a 1-based ordinal, or `min`/`max` with a comparison column and a number/date value type. Code checks the position or unique extremum and verifies that mapped output values came from that record.
+
+A code-level gate recognises explicit English cheapest/lowest-priced, most-expensive/highest-priced, latest/newest/most-recent, earliest/oldest and first wording. Such goals require a valid proof before any evidence check or model audit; missing/invalid proof returns failed with a `Not verified` reason. The required operation/type is also checked: for example, position cannot replace the minimum required by cheapest. First-page scope and first-name form labels are excluded from first-record detection.
+
+This recogniser is not a general language parser. Although the proof protocol supports other ordinals and named records, mandatory-proof detection for other phrasings still depends on further hardening. The independent model audit remains responsible for semantic scope, column meaning and overall goal completion. It cannot override a rejected code-level proof.
+
+Final-state evidence must match current page text, URL or an input value. Earlier selection facts remain available from captured records/history, so checkout confirmation does not need to repeat the product name and price on its final page.
+
+## Recovery and limits
+
+Disabled click targets and model-reported temporary not-ready states receive up to three task-wide two-second waits. Each wait is followed by a fresh observation and decision. New element IDs or navigation do not reset the budget. Explicit locked-account, ISP/access-denied and CAPTCHA/anti-bot states stop without these readiness retries. Missing data requires user input.
+
+Actions have timeouts, tasks have time/step budgets, and repeated identical actions on unchanged observations stop the run. Observation retries handle navigation-related execution-context destruction. Cancellation aborts model requests and is checked between steps; an in-flight browser operation may take its timeout to settle.
+
+Record collections include rendered DOM records only and are capped at 100 rows. Truncated collections cannot verify extrema. Virtualised records, pagination and incomplete scopes require further navigation. Tied extrema, missing/unparseable comparison values and mixed units/currencies cannot be verified.
+
+Number parsing accepts signed decimals, correctly comma-grouped thousands and supported currency symbols/codes. Date parsing accepts valid ISO dates, ISO timestamps with seconds and explicit timezone, English month names (`Oct 30, 2026`, `30 October 2026`), and slash/hyphen year-last dates with unambiguous day/month order (`30/10/2026`, `10/30/2026`). Numeric dates with both components at most 12 are rejected, including equal components. Mixed date-only/timestamp comparisons are rejected.
+
+Canvas-only controls, visual puzzles, downloads/uploads, multi-tab workflows, durable jobs and production network isolation are not implemented. Basic URL checks are not a network security boundary. Use public test sites and synthetic data; do not use this runner for real payments. CAPTCHA solving is not implemented.
+
+## Tests and local popup fixtures
 
 ```bash
 npm run check
 npm test
 ```
 
-Each run writes `runs/<timestamp>/events.jsonl`, numbered screenshots, `result.json`, and `trace.zip`. Inspect a trace with `npx playwright show-trace runs/<timestamp>/trace.zip`. Artifacts can contain task data; review and redact before sharing. Run artifacts are ignored by git by default; copy reviewed evidence deliberately into the final submission.
+The latest code verification passed TypeScript checks and all 21 automated tests. Coverage includes browser observation/actions, empty cells, selection ordering, ties and parsing failures, JSON repair, readiness budgets, telemetry, and an integration test proving a missing selection proof prevents even an approving audit from running.
 
-## Limits and next hardening
+To exercise actual popup obstruction with the configured model:
 
-Current perception uses DOM text and controls; screenshots are recorded and sent to Telegram but are not yet passed to the model. Canvas-only interfaces and visual puzzles are unsupported. CAPTCHA and unavailable credentials require human input; locked accounts should stop. The browser is headless by default; set `HEADLESS=false` to inspect it.
+```bash
+node --import tsx tests/local-fixture.ts tests/fixtures/overlay.html "Click the Run check button and confirm the check completed successfully."
+node --import tsx tests/local-fixture.ts tests/fixtures/delayed-overlay.html "Click the Run check button and confirm the check completed successfully."
+```
 
-Disabled click targets and model-reported temporary not-ready states receive up to three task-wide 2-second waits, with a fresh observation and decision after each. New IDs or page transitions do not reset this budget. Explicit account/network/CAPTCHA access blocks and missing input bypass these readiness retries. Actions have timeouts; task execution has step and time budgets; repeated identical actions on unchanged observations stop the run. Cancellation is checked between steps and aborts model requests; an in-flight browser operation may take its timeout to settle. Basic public URL checks are not a network security boundary. Use only public demo sites; do not expose this runner to untrusted users or real payment tasks. Downloads, uploads, cross-tab flows, durable job recovery, and production network isolation need additional work.
+These are live-model manual runs, separate from `npm test`. The harness routes local HTML to a synthetic HTTPS URL because production navigation rejects localhost. It injects no page-specific decisions or actions. The immediate overlay covers the button. The delayed version shows the overlay at two seconds and enables the button at three seconds, ensuring a meaningful readiness/obstruction challenge. Both passed; the delayed run observed the page before the banner appeared, waited, dismissed it after a blocked click, and verified completion.
 
-Model choice is intended to keep text-based steps fast and inexpensive. Actual reliability, latency, and cost need measurement on the target suite before the final model choice. Add vision selectively for pages whose DOM is insufficient rather than claiming visual capability from screenshots alone.
+## Run artifacts and telemetry
 
-## Initial validation on 30 October 2026
+Each task writes `runs/<UTC timestamp>/` containing numbered screenshots, `events.jsonl`, `result.json` and a Playwright `trace.zip` when tracing is available. Inspect a trace with:
 
-TypeScript checks and four automated tests pass. A live Sauce Demo run completed checkout for the cheapest item, Sauce Labs Onesie at $7.99, and returned structured details after checking confirmation evidence and the independent completion audit. A locked-account run correctly returned blocked. The smaller initial model failed to maintain progress, so development switched to GPT-4.1 with explicit observation history and response schema feedback.
+```bash
+npx playwright show-trace runs/<timestamp>/trace.zip
+```
 
-The Internet demo site reset the connection during both browser and curl checks. Its login, dynamic-loading, and input tasks remain unvalidated against the live site. Telegram code is implemented but awaits bot credentials and a live integration test. Unfamiliar-site testing and submission packaging are still pending.
+Every model HTTP attempt, including JSON-repair retries and final audits, records a `modelCall` event with its step, phase, attempt, requested/returned model, provider, response ID, HTTP status, raw OpenRouter usage and `latencyMs`. Request latency includes network and complete response-body reading; it is not server-only inference time or time to first token.
 
-Record collection limits: only rendered DOM records are observed. Collections are capped at 100 rows and marked truncated; selection verification rejects truncated collections. Number parsing accepts signed decimals, comma-grouped thousands, and supported currency symbols/codes; it rejects malformed or partially numeric text and mixed currencies/units. Date parsing accepts valid ISO `YYYY-MM-DD` dates, ISO timestamps with seconds and an explicit timezone, English abbreviated/full month names (`Oct 30, 2026`, `30 October 2026`), and slash/hyphen year-last numeric dates with unambiguous day/month order (`30/10/2026`, `10/30/2026`). Numeric dates with both components at most 12 are conservatively rejected, including equal components; no locale is assumed. Ambiguous locale dates, invalid dates, and mixed date-only/timestamp comparisons cannot be verified. Tied extrema require clarification instead of arbitrary tie-breaking. Virtualized/off-page records require additional navigation. Field mappings are checked against captured cells; the independent model audit remains responsible for matching the requested record scope and meaning to those columns.
+`usage.cost` is the OpenRouter-reported USD credit charge. Missing usage/cost remains null rather than being zero-filled or estimated. `result.json.metrics` totals tokens, cost and model-call latency, and records wall time through browser cleanup. Steps count completed planning decisions, including finish/blocked decisions; repair attempts and audits are separate calls, not extra steps.
+
+Raw screenshots, traces and task events can contain credentials or form data. Runs are ignored by git; review and redact evidence before sharing or deliberately packaging selected runs.
+
+## Validation and model choice
+
+Live validation on 30 October 2026 covered:
+
+- Cheapest-item checkout: Sauce Labs Onesie at $7.99, final order confirmation.
+- Locked-account and Etisalat ISP-denial pages: correctly reported blocked.
+- Login: Practice Test Automation demo, with successful-login message and logout control.
+- Delayed content: DemoQA button text `Visible After 5 Seconds` observed after waiting.
+- Forms: DemoQA submitted output matched all four supplied fields.
+- Detail extraction: Sauce Demo Backpack and Fleece Jacket name, price and description.
+- Unfamiliar-flow development tests: Books first-page cheapest title/price; OrangeHRM actual row 1 with an empty job title preserved as null.
+- Telegram screenshots and clarification/resumption; immediate and delayed local popup recovery.
+
+Heroku HTTPS resets connections on the current Etisalat network. HTTP returns an ISP filtering page, not the target application. Its successful login/dynamic/input scenarios therefore remain untested on that site; alternatives above were exercised. Stack Overflow stopped at a Cloudflare interstitial. BBC and Automation Exercise showed no consent popup, so their extraction runs do not count as popup-dismissal tests.
+
+A single sequential run per task/model found GPT-4.1 faster but more expensive than GPT-4.1-mini on Books and checkout. Mini's outputs were correct on manual review but omitted selection proofs; its audit originally accepted them. After the code-level gate, a Books rerun with Mini was rejected as not verified and GPT-4.1 still passed with a valid proof. Detailed tokens/cost/timing and the historical caveat are in [NOTES.md](NOTES.md). These samples do not establish statistical success rates, and no vision-mode benchmark has been run.
+
+The evaluator's held-out test has not occurred. Final evidence packaging, the presentation and submission archive remain to be prepared.
