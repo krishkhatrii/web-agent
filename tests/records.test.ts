@@ -51,3 +51,18 @@ test('position supports nth selection and does not compare empty fields',()=>{
   assert.equal(checkSelection({...selection,row:2,order:{op:'position',position:2}},{name:'Later Person',job_title:'Engineer'},sources).passed,true);
   assert.equal(checkSelection({...selection,row:1,order:{op:'position',position:2}},{name:'First Person',job_title:null},sources).passed,false);
 });
+
+test('common named and unambiguous numeric dates match ISO calendar dates',()=>{
+  for(const raw of ['Oct 30, 2026','October 30, 2026','oct 30 2026','Oct. 30, 2026','30 Oct 2026','30 October 2026','30/10/2026','10/30/2026','30-10-2026','10-30-2026'])
+    assert.deepEqual(parseDate(raw),parseDate('2026-10-30'),raw);
+  assert.deepEqual(parseDate('Sept 15, 2026'),parseDate('2026-09-15'));
+  assert.deepEqual(parseDate('29/02/2024'),parseDate('2024-02-29'));
+  assert.equal(comparison(['Oct 30, 2026','31/10/2026','2026-10-29'],'max','date',2).passed,true);
+  assert.equal(comparison(['Oct 30, 2026','30/10/2026'],'max','date',1).passed,false);
+});
+test('ambiguous numeric dates and impossible calendar dates remain unparseable',()=>{
+  for(const raw of ['03/04/2026','12/11/2026','10/10/2026','03-04-2026','30/13/2026','31/04/2026','29/02/2025','Feb 30, 2026','31 April 2026','Octoberfoo 30, 2026','30/10-2026','30/10/26']) {
+    assert.equal(parseDate(raw),null,raw);
+    assert.equal(comparison(['2026-01-01',raw],'max','date',1).passed,false,raw);
+  }
+});

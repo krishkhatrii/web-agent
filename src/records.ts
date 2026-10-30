@@ -15,10 +15,34 @@ export function parseNumber(raw:string):Parsed|null {
   if(prefix&&suffix&&prefix!==suffix)return null;
   return {value,unit:prefix??suffix??'number'};
 }
-// Accept ISO calendar dates or ISO timestamps with an explicit timezone, never guess locale.
+const months:Record<string,number>={};
+for(const [index,name] of ['January','February','March','April','May','June','July','August','September','October','November','December'].entries()) {
+  months[name.toLowerCase()]=index+1;
+  months[name.slice(0,3).toLowerCase()]=index+1;
+}
+months.sept=9;
+// Parse explicit formats, validate the calendar, and never guess day/month order.
 export function parseDate(raw:string):Parsed|null {
   const match=normalize(raw).match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:\d{2}))?$/);
-  if(!match)return null;
+  if(!match) {
+    const input=normalize(raw);
+    const monthFirst=input.match(/^([A-Za-z]+)\.? (\d{1,2}),? (\d{4})$/);
+    const dayFirst=input.match(/^(\d{1,2}) ([A-Za-z]+)\.?,? (\d{4})$/);
+    const numeric=input.match(/^(\d{1,2})([/-])(\d{1,2})\2(\d{4})$/);
+    let year:string,month:number,day:number;
+    if(monthFirst) {
+      year=monthFirst[3];month=months[monthFirst[1].toLowerCase()];day=Number(monthFirst[2]);
+    } else if(dayFirst) {
+      year=dayFirst[3];month=months[dayFirst[2].toLowerCase()];day=Number(dayFirst[1]);
+    } else if(numeric) {
+      const a=Number(numeric[1]),b=Number(numeric[3]);
+      // Both could be months: do not choose a locale, even for equal components.
+      if(a<=12&&b<=12)return null;
+      year=numeric[4];month=a>12?b:a;day=a>12?a:b;
+    } else return null;
+    if(!month)return null;
+    return parseDate(`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`);
+  }
   const [,year,month,day,hour,minute,second,,zone]=match;
   const y=Number(year),m=Number(month),d=Number(day);
   const leap=y%4===0&&(y%100!==0||y%400===0);
