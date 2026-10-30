@@ -1,0 +1,17 @@
+# Local credentials and environment overrides
+.env
+.env.*
+!.env.example
+
+# Dependencies and generated output
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Browser screenshots, traces, and task data
+runs/
+
+# Local logs and OS files
+*.log
+.DS_Store
