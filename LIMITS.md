@@ -1,5 +1,17 @@
 # Reliability limits and next hardening
 
+## Short note on limits
+
+- Tested on login, forms, extraction, checkout and popup fixtures; 11/11 regression scenarios passed. This is not a measured general success rate or a held-out test result.
+- DOM-based perception works well for ordinary controls and tables. Screenshots are not model inputs; canvas-only and visual-only interfaces are unsupported.
+- Selection proofs validate positions, unique extrema and mapped values. Goal wording, scope and field meaning still depend partly on model judgment.
+- Ambiguous dates, ties, mixed units and incomplete/truncated collections cannot be verified. Empty fields remain empty instead of selecting another record.
+- Recovery is bounded: readiness waits, metadata repair and evidence correction can still exhaust their limits on slow or unfamiliar pages.
+- Heroku is blocked on the tested Etisalat network; alternative sites cover successful flows. Account/ISP blocks and CAPTCHA stop honestly; no bypass is implemented.
+- With more time: broaden task contracts and evidence binding, add a measured vision fallback, and harden job persistence, cancellation, isolation and redacted evidence export.
+
+## Detailed limits
+
 This is a development browser agent for public demo tasks, not a production automation service. The tested build completed the 11-scenario CLI suite and selected Telegram evidence runs. One passing suite does not establish a statistical success rate. Original failures, corrected outcomes and measured model samples are preserved in [NOTES.md](NOTES.md).
 
 ## What the evidence supports

@@ -205,4 +205,4 @@ The complete sequential suite executed all 11 scenarios with GPT-4.1. All 11 pas
 
 A single sequential run per task/model found GPT-4.1 faster but more expensive than GPT-4.1-mini on Books and checkout. Mini's outputs were correct on manual review but omitted selection proofs; its audit originally accepted them. After the code-level gate, a Books rerun with Mini was rejected as not verified and GPT-4.1 still passed with a valid proof. Detailed tokens/cost/timing and the historical caveat are in [NOTES.md](NOTES.md). These samples do not establish statistical success rates, and no vision-mode benchmark has been run.
 
-The evaluator's held-out test has not occurred. Final evidence packaging, the presentation and submission archive remain to be prepared.
+Implementation, setup/usage documentation, the limitations note and recorded regression evidence are complete for this development checkpoint. See [NOTES.md](NOTES.md) for the evidence history and [LIMITS.md](LIMITS.md) for the short limits summary. The evaluator's held-out test has not occurred.

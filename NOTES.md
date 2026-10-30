@@ -9,7 +9,7 @@ Living evidence log for the presentation and final submission. Updated 30 Octobe
 - Latest automated suite: 24 tests passed; TypeScript checks passed. Complete CLI regression: 11/11 after correcting the runner-only iframe assertion; original report preserved. Historical milestones below remain unchanged.
 - Explicit selection goals now require code-checked proof before any model audit. Missing/invalid proof returns failed with a Not verified reason. Model approval cannot override the gate.
 - Mandatory-goal recognition currently covers explicit English cheapest/lowest-priced, most-expensive/highest-priced, latest/newest/most-recent, earliest/oldest, and first wording. It is a keyword recognizer, not a general natural-language parser. Semantic scope and other phrasings still need model judgment/hardening.
-- Implementation checkpoint: `09869f2` includes labelled evidence, bounded completion correction and the CLI suite; telemetry/proof gate previously committed in `a54b9d2`. Documentation finalisation is the next commit.
+- Implementation checkpoint: `09869f2` includes labelled evidence, bounded completion correction and the CLI suite; telemetry/proof gate previously committed in `a54b9d2`. Documentation finalisation is committed in `a2ec928`.
 - Telegram end-to-end interaction and later labelled evidence runs passed. The bot has been restarted for the evidence session; process state is session-specific.
 
 ## Main bugs and fixes
@@ -190,8 +190,6 @@ Current test cases, all passing in the last run:
 - Costs/timings before telemetry were not measured; do not backfill them from wall-clock guesses. No repeated-trial statistical benchmark or vision comparison exists.
 - Missing required proof and invalid selection criteria end the task as not verified. Later work added one path-qualification-only metadata repair for existing proofs and up to two field-evidence correction iterations; neither grants success without subsequent checks.
 - Real-site popup dismissal was not demonstrated on BBC/Automation Exercise. Local fixtures did demonstrate actual pointer interception and recovery, including delayed appearance.
-- Final evidence packaging, a maximum-10-slide presentation, and clean submission ZIP remain to be prepared. README reconciliation was completed in the documentation review below.
-- Submission deadline: 5pm Dubai, 30 October 2026. Earlier target was functionality by 2pm and package by 3pm. No submission email has been sent.
 
 ## Commit checkpoints
 
@@ -199,7 +197,9 @@ Current test cases, all passing in the last run:
 - `3c12404`: indexed records and generic ordering.
 - `5e8f2c2`: common date formats with ambiguity rejection.
 - `bcad734`: bounded readiness waits and normal/delayed popup fixtures.
-- Pending: per-call telemetry, mandatory selection-proof gate and this notes log.
+- `a54b9d2`: per-call telemetry, mandatory selection-proof gate, test history and README update.
+- `09869f2`: completion metadata repair, labelled evidence runs and sequential CLI scenario suite.
+- `a2ec928`: final setup/usage documentation, reliability limits and credential review.
 
 ## Maintenance rule
 
@@ -295,10 +295,13 @@ Suite evidence recheck: 11/11 passed after correcting the runner to include capt
 
 Suite runner bug/fix: the initial 10/11 report was a false negative for isp-block because its assertion inspected only top-frame text. Captured iframe element context contains the explicit UAE denial. Updated the assertion to inspect observed element context as well as body text (not model reasoning), then re-evaluated all 11 saved runs: 11/11 pass. Original summary.json remains unchanged; rechecked-summary.json identifies the source report and previous pass flags. No agent logic changed for this assertion fix and no successful task was unnecessarily repeated.
 
-Suite evidence recheck: 11/11 passed after correcting the runner to include captured iframe element context. Original report preserved: runs/suite-2026-10-30T09-57-42-188Z/summary.json. Rechecked report: runs/suite-2026-10-30T09-57-42-188Z/rechecked-summary.json. No browser task was repeated or agent result changed.
 
 - Telegram evidence run [2026-10-30T10-41-14-121Z--isp-block](runs/2026-10-30T10-41-14-121Z--isp-block/result.json): **blocked**. Access to the website is denied due to regulatory restrictions in the UAE. Login and secure area confirmation are not possible. Metrics: {"model":"openai/gpt-4.1","steps":1,"calls":1,"promptTokens":3196,"completionTokens":74,"totalTokens":3270,"costUsd":0.006984,"modelLatencyMs":2285,"wallMs":5106,"missingUsageCalls":0}
 
 ## Documentation finalisation and repository credential review
 
 Committed pending implementation as `09869f2` before documentation-only edits. Completed README setup/environment tables, CLI and labelled Telegram examples, full-suite commands, evidence paths, Heroku substitution note, current validation and model caveats. Added LIMITS.md covering reliability, unsupported UI, proof/parser/scope limits, bounded recovery, network constraints, telemetry and next hardening. Source-file hashes were captured before the docs work to confirm no agent code changes. Scanned nonignored files and historical Git blobs for key/token/private-key patterns and the exact configured API/bot values without printing them; no keys found. Local .env intentionally retains runtime credentials and is git-ignored, as are node_modules and raw runs. No live scenarios were repeated for documentation work.
+
+### Documentation summary cleanup
+
+Added a seven-bullet short limits note above the detailed LIMITS sections. Updated README ending to describe the completed development checkpoint without claiming that a presentation/archive was produced or that the held-out test occurred. Replaced the stale Pending commit entry with actual commits a54b9d2, 09869f2 and a2ec928. Documentation-only changes; no agent code or test outcomes changed.
