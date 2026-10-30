@@ -10,7 +10,7 @@ export const Action = z.discriminatedUnion('type', [
   z.object({ type: z.literal('scroll'), direction: z.enum(['up','down']) }),
   z.object({ type: z.literal('wait'), milliseconds: z.number().int().min(250).max(5000) }),
   z.object({ type: z.literal('ask'), question: z.string().min(1) }),
-  z.object({ type: z.literal('blocked'), reason: z.string().min(1) }),
+  z.object({ type: z.literal('blocked'), reason: z.string().min(1), cause:z.enum(['not_ready','access_denied','missing_input','other']).optional() }),
   z.object({ type: z.literal('finish'), summary: z.string().min(1), evidence: z.array(z.object({
     kind: z.enum(['text','url','value']), expected: z.string().min(1), target: target.optional()
   })).min(1), data: z.record(z.string(),z.unknown()).optional(), selection: z.object({step:z.number().int().min(0),collection:z.string(),row:z.number().int().min(1),order:z.discriminatedUnion('op',[z.object({op:z.literal('position'),position:z.number().int().min(1)}),z.object({op:z.enum(['min','max']),column:z.number().int().min(0),valueType:z.enum(['number','date'])})]),fields:z.record(z.string(),z.array(z.number().int().min(0)).min(1))}).optional() })

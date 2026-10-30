@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Action verification</title>
+<style>
+body {font:18px system-ui;margin:0;background:#f3f5f8;color:#152035} main {max-width:700px;margin:100px auto;padding:40px;background:white;border-radius:12px} button {font:inherit;padding:14px 22px;cursor:pointer} #overlay {position:fixed;inset:0;z-index:9999;background:rgba(10,20,35,.8);display:grid;place-items:center;pointer-events:auto} .panel {max-width:460px;background:white;padding:32px;border-radius:12px;box-shadow:0 20px 80px #000} .choices {display:flex;gap:12px} #result {font-weight:700;color:#146c43}
+</style></head>
+<body>
+<main><h1>Action verification</h1><p>Run the check to verify that the action completed.</p><button id="run">Run check</button><p id="result" role="status">Not run yet.</p></main>
+<div id="overlay"><section class="panel" role="dialog" aria-modal="true" aria-labelledby="privacy-title"><h2 id="privacy-title">Cookie preferences</h2><p>We use essential cookies to keep this site working. Optional cookies help us measure usage. Choose your preferences to continue.</p><div class="choices"><button id="reject">Reject optional cookies</button><button id="accept">Accept all cookies</button></div></section></div>
+<script>
+const overlay=document.getElementById('overlay');
+for(const id of ['reject','accept'])document.getElementById(id).addEventListener('click',()=>overlay.remove());
+document.getElementById('run').addEventListener('click',()=>{
+  document.getElementById('result').textContent='Check complete.';
+  document.getElementById('run').disabled=true;
+});
+</script></body></html>

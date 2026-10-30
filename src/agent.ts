@@ -3,6 +3,7 @@ import { mkdir, appendFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { BrowserDriver, type Observation } from './browser.js';
 import { checkSelection, type RecordSource } from './records.js';
+import { ReadinessBudget } from './readiness.js';
 import { Model } from './model.js';
 import { publicUrl } from './schema.js';
 export type Result = {status:'succeeded'|'blocked'|'failed'|'cancelled';summary:string;runDir:string;data?:unknown};
@@ -15,6 +16,7 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
   const driver=new BrowserDriver();
   const history:any[]=[];
   const recordSources:RecordSource[]=[];
+  const readiness=new ReadinessBudget();
   let result:Result={status:'failed',summary:'Step limit reached without verified completion',runDir};
   const deadline=Date.now()+Number(process.env.MAX_MINUTES||10)*60000;
   const signal=AbortSignal.any([AbortSignal.timeout(Math.max(1000,deadline-Date.now())),...(hooks.signal?[hooks.signal]:[])]);
@@ -32,13 +34,15 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
       const observation=await driver.observe(path.join(runDir,`${String(step).padStart(3,'0')}.png`));
       await log({step,observation});
       if(observation.collections.length)recordSources.push({step,url:observation.url,collections:observation.collections});
-      const decision=await model.decide({goal,step,observation,recordSources,history:history.slice(-16)},signal);
-      const action=decision.action;
+      const decision=await model.decide({goal,step,observation,recordSources,history:history.slice(-16),readiness:{waitsUsed:readiness.used,waitLimit:3,waitMilliseconds:2000}},signal);
+      const policy=readiness.apply(decision.action,observation.elements);
+      const action=policy.action;
       await log({step,decision});
-      await notify(`Step ${step+1}: ${decision.reason}`,observation.screenshot);
+      if(policy.retry)await log({step,readinessWait:readiness.used,effectiveAction:action});
+      await notify(`Step ${step+1}: ${policy.retry?`Not ready yet; waiting and re-observing (${readiness.used}/3).`:decision.reason}`,observation.screenshot);
       const signature=JSON.stringify({action,url:observation.url,text:observation.text,elements:observation.elements});
       repeats=signature===previous?repeats+1:0;previous=signature;
-      if(repeats>=2) {result={status:'blocked',summary:'Repeated action produced no observable progress',runDir};break;}
+      if(repeats>=2&&!policy.retry) {result={status:'blocked',summary:'Repeated action produced no observable progress',runDir};break;}
       if(action.type==='blocked') {result={status:'blocked',summary:action.reason,runDir};break;}
       if(action.type==='ask') {
         if(!hooks.ask) {result={status:'blocked',summary:action.question,runDir};break;}
