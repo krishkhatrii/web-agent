@@ -2,7 +2,7 @@
 
 A goal-driven browser agent controlled from a CLI or Telegram. Each task launches a fresh Chromium browser, observes the page, chooses a validated action, executes it and checks the result. Runtime actions use controls discovered from the current page, with no target-site selector scripts.
 
-Development history, original failures, fixes and presentation evidence are in [NOTES.md](NOTES.md).
+Development history, original failures, fixes and presentation evidence are in [NOTES.md](NOTES.md). Reliability boundaries and next hardening steps are in [LIMITS.md](LIMITS.md).
 
 ## Setup
 
@@ -25,6 +25,17 @@ Copy the environment template only for a new setup; preserve an existing `.env`.
 | `HEADLESS` | `true` by default; `false` shows the browser |
 | `MAX_STEPS` | Task step limit, default 45 |
 | `MAX_MINUTES` | Task time budget, default 10 |
+
+For the optional CLI scenario suite, also set the following demo-account credentials in local `.env` using the values supplied by the task brief/demo sites:
+
+| Variables | Demo |
+|---|---|
+| `TEST_SAUCE_USERNAME`, `TEST_SAUCE_LOCKED_USERNAME`, `TEST_SAUCE_PASSWORD` | Sauce Demo normal and locked accounts |
+| `TEST_LOGIN_USERNAME`, `TEST_LOGIN_PASSWORD` | Practice Test Automation login |
+| `TEST_ORANGEHRM_USERNAME`, `TEST_ORANGEHRM_PASSWORD` | OrangeHRM demo |
+| `TEST_INTERNET_USERNAME`, `TEST_INTERNET_PASSWORD` | Original Heroku login scenario; currently an expected ISP block |
+
+These values are used by the regression runner to construct goals. The standalone CLI/Telegram agent receives login credentials in the task itself; it does not automatically use the `TEST_*` values.
 
 The model ID is configurable, not hardcoded as a fallback. Keep `.env`, dependencies and raw run artifacts out of source control. Do not include `.env` or the original credential-bearing brief in a submission archive.
 
@@ -52,7 +63,33 @@ npm run bot
 
 Send `[scenario-label]` followed by a public sandbox URL and a goal in one message. The optional label becomes the readable suffix of its timestamped evidence folder; without a label the hostname is used. Example: `[dynamic] https://demoqa.com/dynamic-properties Wait for the delayed button and return its text.` Labels are removed from the model goal. The bot announces the evidence folder and appends completed Telegram results/metrics to `NOTES.md`. The bot sends progress screenshots, a final status and extracted data when available. If it asks a question, reply normally in the same chat to resume. `/cancel` requests cancellation; `/help` shows usage. Only the configured chat is accepted, and one task runs at a time. Long polling needs no webhook or hosted server; keep the laptop awake and the process running.
 
-Telegram task submission, screenshots, waiting for a user reply and resumption have been tested end to end. The bot was stopped after that test; starting the project does not automatically start it.
+Telegram task submission, screenshots, waiting for a user reply and resumption have been tested end to end, followed by labelled scenario evidence runs. Start the bot explicitly with `npm run bot`; installation or CLI task execution does not start it. Stop the polling process with Ctrl+C; an in-flight polling request may take a short time to settle. Do not run multiple pollers for the same bot token.
+
+## Example tasks
+
+Send these as Telegram messages. Replace credential placeholders with the demo values before sending. Labels affect folder naming only, not planning. Use URLs as plain text.
+
+```text
+[checkout] https://www.saucedemo.com/ Log in as <demo username> with password <demo password>. Find the cheapest product, add exactly one to the cart, and complete checkout with first name Demo, last name User, postal code 00000. Verify confirmation and return product name and price.
+
+[blocked-login] https://www.saucedemo.com/ Log in as <locked demo username> with password <demo password> and complete checkout. Report honestly if the account is blocked.
+
+[login] https://practicetestautomation.com/practice-test-login/ Log in as <demo username> with password <demo password> and verify the logged-in success page.
+
+[dynamic] https://demoqa.com/dynamic-properties Wait for the button that appears after five seconds and return its exact text.
+
+[form] https://demoqa.com/text-box Fill name Demo User, email demo.user@example.com, current address Dubai, permanent address Mumbai. Submit and verify all four values in the rendered output.
+
+[extract] https://www.saucedemo.com/ Log in as <demo username> with password <demo password>, open the fleece jacket and return name, price and description as JSON.
+
+[books] https://books.toscrape.com/ Find the cheapest book on the first catalogue page only. Compare all prices and return its full title and price, opening its detail page if the title is truncated.
+
+[orangehrm] https://opensource-demo.orangehrmlive.com/ Log in as <demo username> with password <demo password>, go to the employee list and return the first employee's name and job title. Preserve an empty job title as null. Do not edit records.
+
+[ask-user] https://www.saucedemo.com/ Ask me which username to use and wait for my reply. Then fill only the username field and verify its value. Do not log in.
+```
+
+For CLI tasks, use `npm run agent -- <url> "<goal>"` with the URL outside the quoted goal. To label a CLI run, set `RUN_LABEL=extract` before the command; otherwise the hostname is the folder suffix. Do not put API keys or bot tokens in task text.
 
 ## Project structure
 
@@ -131,7 +168,7 @@ Each scenario gets a labelled run folder. The runner writes its console log and 
 
 ## Run artifacts and telemetry
 
-Each task writes `runs/<UTC timestamp>/` containing numbered screenshots, `events.jsonl`, `result.json` and a Playwright `trace.zip` when tracing is available. Inspect a trace with:
+Each task writes `runs/<UTC timestamp>--<label-or-hostname>/` containing numbered screenshots, `events.jsonl`, `result.json` and a Playwright `trace.zip` when tracing is available. Inspect a trace with:
 
 ```bash
 npx playwright show-trace runs/<timestamp>/trace.zip
@@ -156,7 +193,15 @@ Live validation on 30 October 2026 covered:
 - Unfamiliar-flow development tests: Books first-page cheapest title/price; OrangeHRM actual row 1 with an empty job title preserved as null.
 - Telegram screenshots and clarification/resumption; immediate and delayed local popup recovery.
 
+### Heroku access and alternative test sites
+
 Heroku HTTPS resets connections on the current Etisalat network. HTTP returns an ISP filtering page, not the target application. Its successful login/dynamic/input scenarios therefore remain untested on that site; alternatives above were exercised. Stack Overflow stopped at a Cloudflare interstitial. BBC and Automation Exercise showed no consent popup, so their extraction runs do not count as popup-dismissal tests.
+
+The original successful-login scenario was replaced with Practice Test Automation, delayed content with DemoQA Dynamic Properties, and input/form coverage with DemoQA Text Box. The HTTP Heroku task remains a negative test of honest ISP-block reporting. These substitutions were accepted in the task discussion; they are not claims that Heroku itself was successfully exercised.
+
+### Regression results and model comparison
+
+The complete sequential suite executed all 11 scenarios with GPT-4.1. All 11 passed after correcting the runner's ISP assertion to inspect captured iframe context; the original 10/11 report is preserved alongside the rechecked report. This was a runner assertion fix, not a change to the agent's correct blocked outcome. Both blocked scenarios are expected passes, not successful logins.
 
 A single sequential run per task/model found GPT-4.1 faster but more expensive than GPT-4.1-mini on Books and checkout. Mini's outputs were correct on manual review but omitted selection proofs; its audit originally accepted them. After the code-level gate, a Books rerun with Mini was rejected as not verified and GPT-4.1 still passed with a valid proof. Detailed tokens/cost/timing and the historical caveat are in [NOTES.md](NOTES.md). These samples do not establish statistical success rates, and no vision-mode benchmark has been run.
 
