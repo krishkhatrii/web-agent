@@ -1,5 +1,5 @@
 export type ModelCall = {
-  call:number;phase:'plan'|'verify';attempt:number;requestedModel:string;model:string;
+  call:number;phase:'plan'|'verify'|'repair';attempt:number;requestedModel:string;model:string;
   responseId:string|null;provider:string|null;httpStatus:number|null;latencyMs:number;
   usage:Record<string,any>|null;error:string|null;
 };

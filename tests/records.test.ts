@@ -77,3 +77,20 @@ test('completion gate requires proof even without observed collections and rejec
   assert.equal(checkCompletionSelection('Fill first name and last name',finish,[]).passed,true);
   assert.equal(requiredSelectionOrder('Read the first catalogue page'),null);
 });
+
+test('nested data requires explicit paths; unqualified leaf names and wrong values cannot pass',()=>{
+  const data={employee:{name:'First Person',job_title:null}};
+  assert.equal(checkSelection(selection,data,sources).passed,false);
+  const nested={...selection,fields:{'employee.name':[0],'employee.job_title':[1]}};
+  assert.equal(checkSelection(nested,data,sources).passed,true);
+  assert.equal(checkSelection(nested,{employee:{name:'Later Person',job_title:null}},sources).passed,false);
+  assert.equal(checkSelection({...nested,fields:{'employee.missing':[0]}},data,sources).passed,false);
+});
+
+test('a whole-card Text column cannot certify a description substring',()=>{
+  const records:RecordSource[]=[{step:0,url:'https://example.com',collections:[{id:'g0',kind:'cards',frame:0,headers:['Title','Price','Text'],rows:[{index:1,cells:['Jacket','$5.00','Jacket Warm fleece jacket $5.00 Add to cart']}],truncated:false}]}];
+  const proof:Selection={step:0,collection:'g0',row:1,order:{op:'position',position:1},fields:{name:[0],price:[1],description:[2]}};
+  const result=checkSelection(proof,{name:'Jacket',price:'$5.00',description:'Warm fleece jacket'},records);
+  assert.equal(result.passed,false);
+  assert.equal('fieldMismatch' in result&&result.fieldMismatch,true);
+});

@@ -24,3 +24,28 @@ test('missing selection proof fails before evidence checks or an approving model
     if(original.model===undefined)delete process.env.OPENROUTER_MODEL;else process.env.OPENROUTER_MODEL=original.model;
   }
 });
+
+test('metadata repair can qualify paths once but cannot change column mappings or repeat browser actions',async()=>{
+  const original={start:BrowserDriver.prototype.start,observe:BrowserDriver.prototype.observe,close:BrowserDriver.prototype.close,verify:BrowserDriver.prototype.verify,act:BrowserDriver.prototype.act,decide:Model.prototype.decide,audit:Model.prototype.verifyGoal,repair:Model.prototype.repairSelectionFields,key:process.env.OPENROUTER_API_KEY,model:process.env.OPENROUTER_MODEL};
+  try {
+    process.env.OPENROUTER_API_KEY='test';process.env.OPENROUTER_MODEL='test';
+    BrowserDriver.prototype.start=async()=>{};BrowserDriver.prototype.close=async()=>{};
+    BrowserDriver.prototype.act=async()=>{throw new Error('Must not repeat a browser action');};
+    BrowserDriver.prototype.observe=async()=>({url:'https://example.com/complete',title:'Complete',text:'Order confirmed',elements:[],collections:[{id:'g0',kind:'cards',frame:0,headers:['Title','Price'],rows:[{index:1,cells:['Item A','$5.00']}],truncated:false}],screenshot:''});
+    BrowserDriver.prototype.verify=async()=>[{kind:'text',expected:'Order confirmed',passed:true}];
+    Model.prototype.decide=async()=>({reason:'Complete',action:{type:'finish',summary:'Done',evidence:[{kind:'text',expected:'Order confirmed'}],data:{product:{Title:'Item A',Price:'$5.00'}},selection:{step:0,collection:'g0',row:1,order:{op:'min',column:1,valueType:'number'},fields:{Title:[0],Price:[1]}}}});
+    for(const valid of [true,false]) {
+      let repairs=0,audits=0;
+      Model.prototype.repairSelectionFields=async()=>{repairs++;return {'product.Title':[valid?0:1],'product.Price':[1]};};
+      Model.prototype.verifyGoal=async()=>{audits++;return {verdict:'succeeded',reason:'Observed'};};
+      const result=await runTask('https://example.com/','Buy the cheapest item');
+      assert.equal(repairs,1);assert.equal(audits,valid?1:0);
+      assert.equal(result.status,valid?'succeeded':'failed');
+      if(valid)assert.deepEqual(result.data,{product:{Title:'Item A',Price:'$5.00'}});
+    }
+  } finally {
+    BrowserDriver.prototype.start=original.start;BrowserDriver.prototype.observe=original.observe;BrowserDriver.prototype.close=original.close;BrowserDriver.prototype.verify=original.verify;BrowserDriver.prototype.act=original.act;Model.prototype.decide=original.decide;Model.prototype.verifyGoal=original.audit;Model.prototype.repairSelectionFields=original.repair;
+    if(original.key===undefined)delete process.env.OPENROUTER_API_KEY;else process.env.OPENROUTER_API_KEY=original.key;
+    if(original.model===undefined)delete process.env.OPENROUTER_MODEL;else process.env.OPENROUTER_MODEL=original.model;
+  }
+});

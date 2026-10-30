@@ -79,9 +79,16 @@ export function checkSelection(selection:Selection,data:Record<string,unknown>|u
   for(const [field,columns] of Object.entries(selection.fields)) {
     if(columns.some(c=>c>=row.cells.length))return {passed:false,reason:`Invalid column for ${field}`};
     const expected=normalize(columns.map(c=>row.cells[c]).join(' '));
-    const actual=data?.[field];
+    // Exact top-level keys take precedence; nested outputs require explicit dot paths.
+    let actual:unknown=data;
+    if(data&&Object.hasOwn(data,field))actual=data[field];
+    else for(const key of field.split('.')) {
+      if(!actual||typeof actual!=='object'||!Object.hasOwn(actual,key)){actual=undefined;break;}
+      actual=(actual as Record<string,unknown>)[key];
+    }
+    if(actual===undefined)return {passed:false,reason:`Output path ${field} is missing; use an exact data path`,repairable:true};
     if(expected==='' ? actual!==null&&actual!=='' : typeof actual!=='string'||normalize(actual)!==expected)
-      return {passed:false,reason:`Field ${field} must come from selected row ${row.index}: ${JSON.stringify(expected||null)}`};
+      return {passed:false,reason:`Field ${field} must come from selected row ${row.index}: ${JSON.stringify(expected||null)}`,fieldMismatch:true};
   }
   return {passed:true,reason:'Record selection and mapped output fields match observed cells',source:{step:source.step,url:source.url,collection:collection.id,headers:collection.headers,row}};
 }

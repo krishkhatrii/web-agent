@@ -1,1 +1,23 @@
-{"name":"web-task-agent","version":"0.1.0","private":true,"type":"module","scripts":{"agent":"tsx src/cli.ts","bot":"tsx src/telegram.ts","check":"tsc --noEmit","test":"tsx --test tests/*.test.ts"},"dependencies":{"dotenv":"^17.0.0","playwright":"^1.56.0","zod":"^4.0.0"},"devDependencies":{"@types/node":"^22.0.0","tsx":"^4.20.0","typescript":"^5.9.0"}}
+{
+  "name": "web-task-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "agent": "tsx src/cli.ts",
+    "bot": "tsx src/telegram.ts",
+    "check": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "scenarios": "node --import tsx scripts/scenarios.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.0.0",
+    "playwright": "^1.56.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

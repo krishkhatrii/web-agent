@@ -50,7 +50,7 @@ Create a bot using @BotFather. Set its token and your numeric chat ID in `.env` 
 npm run bot
 ```
 
-Send a public sandbox URL and a goal in one message. The bot sends progress screenshots, a final status and extracted data when available. If it asks a question, reply normally in the same chat to resume. `/cancel` requests cancellation; `/help` shows usage. Only the configured chat is accepted, and one task runs at a time. Long polling needs no webhook or hosted server; keep the laptop awake and the process running.
+Send `[scenario-label]` followed by a public sandbox URL and a goal in one message. The optional label becomes the readable suffix of its timestamped evidence folder; without a label the hostname is used. Example: `[dynamic] https://demoqa.com/dynamic-properties Wait for the delayed button and return its text.` Labels are removed from the model goal. The bot announces the evidence folder and appends completed Telegram results/metrics to `NOTES.md`. The bot sends progress screenshots, a final status and extracted data when available. If it asks a question, reply normally in the same chat to resume. `/cancel` requests cancellation; `/help` shows usage. Only the configured chat is accepted, and one task runs at a time. Long polling needs no webhook or hosted server; keep the laptop awake and the process running.
 
 Telegram task submission, screenshots, waiting for a user reply and resumption have been tested end to end. The bot was stopped after that test; starting the project does not automatically start it.
 
@@ -79,13 +79,13 @@ The model receives visible DOM text, current element IDs and structured records.
 
 Observations preserve 1-based table row indices, aligned headers/cells and empty fields. Generic repeated product cards expose title, price and text columns. Extracted empty fields are reported as null instead of selecting another populated record.
 
-Selection proofs reference a captured observation, collection, row and field-to-column mappings. They use `position` with a 1-based ordinal, or `min`/`max` with a comparison column and a number/date value type. Code checks the position or unique extremum and verifies that mapped output values came from that record.
+Selection proofs reference a captured observation, collection, row and field-to-column mappings. Mapping keys must identify exact returned data keys; flat output is preferred, while nested output uses explicit dot paths such as `cheapest_product.Title`. Unqualified nested leaf names do not match automatically. They use `position` with a 1-based ordinal, or `min`/`max` with a comparison column and a number/date value type. Code checks the position or unique extremum and verifies that mapped output values came from that record.
 
-A code-level gate recognises explicit English cheapest/lowest-priced, most-expensive/highest-priced, latest/newest/most-recent, earliest/oldest and first wording. Such goals require a valid proof before any evidence check or model audit; missing/invalid proof returns failed with a `Not verified` reason. The required operation/type is also checked: for example, position cannot replace the minimum required by cheapest. First-page scope and first-name form labels are excluded from first-record detection.
+A code-level gate recognises explicit English cheapest/lowest-priced, most-expensive/highest-priced, latest/newest/most-recent, earliest/oldest and first wording. Such goals require a valid proof before any evidence check or model audit; missing/invalid proof returns failed with a `Not verified` reason. An existing proof with a missing output path gets one metadata-only repair attempt: only exact field-path qualification is permitted, while source, row, order, column mappings and data remain fixed. The full checks run again; failed repair stays not verified. A missing proof never receives this repair. The required operation/type is also checked: for example, position cannot replace the minimum required by cheapest. First-page scope and first-name form labels are excluded from first-record detection.
 
 This recogniser is not a general language parser. Although the proof protocol supports other ordinals and named records, mandatory-proof detection for other phrasings still depends on further hardening. The independent model audit remains responsible for semantic scope, column meaning and overall goal completion. It cannot override a rejected code-level proof.
 
-Final-state evidence must match current page text, URL or an input value. Earlier selection facts remain available from captured records/history, so checkout confirmation does not need to repeat the product name and price on its final page.
+A value-to-column mismatch gets at most two evidence-correction iterations; success remains disallowed until the proof is valid. This can gather the requested detail-page evidence instead of treating a whole-card Text column as a standalone description. Missing required proofs and invalid selection criteria still fail immediately. Final-state evidence must match current page text, URL or an input value. Earlier selection facts remain available from captured records/history, so checkout confirmation does not need to repeat the product name and price on its final page.
 
 ## Recovery and limits
 
@@ -106,7 +106,7 @@ npm run check
 npm test
 ```
 
-The latest code verification passed TypeScript checks and all 21 automated tests. Coverage includes browser observation/actions, empty cells, selection ordering, ties and parsing failures, JSON repair, readiness budgets, telemetry, and an integration test proving a missing selection proof prevents even an approving audit from running.
+The latest code verification passed TypeScript checks and all 24 automated tests. Coverage includes browser observation/actions, empty cells, selection ordering, ties and parsing failures, JSON repair, readiness budgets, telemetry, and an integration test proving a missing selection proof prevents even an approving audit from running.
 
 To exercise actual popup obstruction with the configured model:
 
@@ -117,6 +117,18 @@ node --import tsx tests/local-fixture.ts tests/fixtures/delayed-overlay.html "Cl
 
 These are live-model manual runs, separate from `npm test`. The harness routes local HTML to a synthetic HTTPS URL because production navigation rejects localhost. It injects no page-specific decisions or actions. The immediate overlay covers the button. The delayed version shows the overlay at two seconds and enables the button at three seconds, ensuring a meaningful readiness/obstruction challenge. Both passed; the delayed run observed the page before the banner appeared, waited, dismissed it after a blocked click, and verified completion.
 
+## Sequential CLI scenario suite
+
+Configure the `TEST_*` demo-account variables listed in `.env.example`, then run:
+
+```bash
+npm run scenarios
+```
+
+This runs checkout, locked-account login, HTTP ISP denial, successful login, delayed content, form submission, product-detail extraction, Books, OrangeHRM, and both local popup fixtures sequentially. Each scenario launches the CLI in its own process and fresh browser; no site-specific execution steps are injected into the agent. Expected blocked outcomes count as passes only when the page contains corresponding block evidence. Success cases also check scenario-specific outputs/evidence. The delayed-content case requires observing the button absent before it appears, so a page that finishes loading after the delay does not count as dynamic-wait coverage.
+
+Each scenario gets a labelled run folder. The runner writes its console log and incremental `summary.json` into `runs/suite-<timestamp>/`, appends results to `NOTES.md`, continues after individual failures, and prints a final pass/fail table with steps, tokens, USD cost and elapsed time. Exit code is 0 only when all scenarios pass. To recheck saved evidence without repeating browser/model calls, run `npm run scenarios -- --recheck runs/suite-<timestamp>/summary.json`; this preserves the original report and writes `rechecked-summary.json`. Do not interpret this fixed regression suite as the evaluator's held-out test.
+
 ## Run artifacts and telemetry
 
 Each task writes `runs/<UTC timestamp>/` containing numbered screenshots, `events.jsonl`, `result.json` and a Playwright `trace.zip` when tracing is available. Inspect a trace with:
@@ -125,7 +137,7 @@ Each task writes `runs/<UTC timestamp>/` containing numbered screenshots, `event
 npx playwright show-trace runs/<timestamp>/trace.zip
 ```
 
-Every model HTTP attempt, including JSON-repair retries and final audits, records a `modelCall` event with its step, phase, attempt, requested/returned model, provider, response ID, HTTP status, raw OpenRouter usage and `latencyMs`. Request latency includes network and complete response-body reading; it is not server-only inference time or time to first token.
+Every model HTTP attempt, including JSON-repair retries, metadata-only repairs and final audits, records a `modelCall` event with its step, phase, attempt, requested/returned model, provider, response ID, HTTP status, raw OpenRouter usage and `latencyMs`. Request latency includes network and complete response-body reading; it is not server-only inference time or time to first token.
 
 `usage.cost` is the OpenRouter-reported USD credit charge. Missing usage/cost remains null rather than being zero-filled or estimated. `result.json.metrics` totals tokens, cost and model-call latency, and records wall time through browser cleanup. Steps count completed planning decisions, including finish/blocked decisions; repair attempts and audits are separate calls, not extra steps.
 

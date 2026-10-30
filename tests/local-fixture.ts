@@ -18,6 +18,6 @@ chromium.launch=async options=>{
   };
   return browser;
 };
-const result=await runTask(url,words.join(' '));
+const result=await runTask(url,words.join(' '),{runLabel:process.env.RUN_LABEL});
 console.log(JSON.stringify(result,null,2));
 process.exitCode=result.status==='succeeded'?0:2;

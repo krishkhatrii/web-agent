@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { readFile, appendFile } from 'node:fs/promises';
 import { runTask } from './agent.js';
 const token=process.env.TELEGRAM_BOT_TOKEN;
 const allowed=process.env.TELEGRAM_ALLOWED_CHAT_ID;
@@ -30,15 +31,17 @@ while(running) {
       if(String(message?.chat?.id)!==allowed||typeof message?.text!=='string')continue;
       const text=message.text.trim();
       if(text==='/cancel'){active?.abort();answer?.('Task cancelled');answer=undefined;await send('Cancellation requested.');continue;}
-      if(text==='/start'||text==='/help'){await send('Send a public sandbox URL and a goal, for example: https://the-internet.herokuapp.com/inputs Enter 42 and verify the value. Use /cancel to stop. Reply normally when I ask a question.');continue;}
+      if(text==='/start'||text==='/help'){await send('Send [scenario-label] followed by a public sandbox URL and goal. Example: [dynamic] https://demoqa.com/dynamic-properties Wait for the delayed button and return its text. Labels name your evidence folder. Use /cancel to stop. Reply normally when I ask a question.');continue;}
       if(answer){const resolve=answer;answer=undefined;console.log('Telegram user reply received; resuming task.');resolve(text);continue;}
       if(active){await send('A task is already running. Use /cancel first.');continue;}
-      const match=text.match(/https?:\/\/[^\s]+/);
+      const labelled=text.match(/^\[([^\]\n]{1,60})\]\s*/);
+      const task=labelled?text.slice(labelled[0].length):text;
+      const match=task.match(/https?:\/\/[^\s]+/);
       if(!match){await send('Include the site URL with your task.');continue;}
-      const goal=text.replace(match[0],'').trim();
+      const goal=task.replace(match[0],'').trim();
       if(!goal){await send('Include a goal alongside the URL.');continue;}
       const controller=new AbortController();active=controller;
-      void runTask(match[0],goal,{signal:controller.signal,progress,ask:async(question)=>{
+      void runTask(match[0],goal,{runLabel:labelled?.[1],signal:controller.signal,progress,ask:async(question)=>{
         const reply=new Promise<string>((resolve,reject)=>{
           const cancel=()=>{answer=undefined;reject(new Error('Cancelled'));};
           answer=(text)=>{controller.signal.removeEventListener('abort',cancel);resolve(text);};
@@ -47,7 +50,12 @@ while(running) {
         await send(`I need your input: ${question}`);
         console.log('Telegram question delivered; waiting for user reply.');
         return reply;
-      }}).then(async result=>{if(result.data)await send(JSON.stringify(result.data,null,2));}).catch(async()=>{await send('Task could not start. Check local configuration and logs.');}).finally(()=>{active=undefined;answer=undefined;});
+      }}).then(async result=>{
+        const folder=path.basename(result.runDir);
+        const summary=result.summary.replace(/\s+/g,' ').replace(/\|/g,'/');
+        await appendFile('NOTES.md',`\n- Telegram evidence run [${folder}](runs/${folder}/result.json): **${result.status}**. ${summary} Metrics: ${JSON.stringify(result.metrics)}\n`);
+        if(result.data)await send(JSON.stringify(result.data,null,2));
+      }).catch(async()=>{await send('Task could not start. Check local configuration and logs.');}).finally(()=>{active=undefined;answer=undefined;});
     }
   }catch {console.warn('Telegram polling failed; retrying in 3 seconds.');await new Promise(r=>setTimeout(r,3000));}
 }

@@ -8,13 +8,15 @@ import {summarizeCalls,type ModelCall} from './metrics.js';
 import { Model } from './model.js';
 import { publicUrl } from './schema.js';
 export type Result = {status:'succeeded'|'blocked'|'failed'|'cancelled';summary:string;runDir:string;data?:unknown;metrics?:ReturnType<typeof summarizeCalls>};
-export type Hooks = {progress?:(message:string,screenshot?:string)=>Promise<void>;ask?:(question:string)=>Promise<string>;signal?:AbortSignal};
+export type Hooks = {runLabel?:string;progress?:(message:string,screenshot?:string)=>Promise<void>;ask?:(question:string)=>Promise<string>;signal?:AbortSignal};
 export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Result> {
   publicUrl(url);
   const started=performance.now();
   let steps=0,activeStep=-1;
+  let metadataRepairs=0,fieldCorrections=0;
   const calls:ModelCall[]=[];
-  const runDir=path.resolve('runs',new Date().toISOString().replace(/[:.]/g,'-'));
+  const label=(hooks.runLabel||new URL(url).hostname).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,60)||'task';
+  const runDir=path.resolve('runs',new Date().toISOString().replace(/[:.]/g,'-')+'--'+label);
   await mkdir(runDir,{recursive:true});
   const driver=new BrowserDriver();
   const history:any[]=[];
@@ -31,7 +33,8 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
   const model=new Model(undefined,undefined,async call=>{calls.push(call);await log({step:activeStep,modelCall:call});});
   try {
     await driver.start(url);
-    await notify('Browser launched. Starting task.');
+    await log({runLabel:label});
+    await notify(`Browser launched. Evidence run: ${path.basename(runDir)}`);
     let repeats=0;let previous='';
     for(let step=0;step<Number(process.env.MAX_STEPS||45);step++) {
       signal.throwIfAborted();
@@ -56,18 +59,44 @@ export async function runTask(url:string,goal:string,hooks:Hooks={}):Promise<Res
         history.push({question:action.question,answer}); continue;
       }
       if(action.type==='finish') {
-        const selectionCheck=checkCompletionSelection(goal,action,recordSources);
+        let completion=action;
+        let selectionCheck=checkCompletionSelection(goal,completion,recordSources);
+        if(!selectionCheck.passed&&'repairable' in selectionCheck&&selectionCheck.repairable&&completion.selection&&metadataRepairs<1) {
+          metadataRepairs++;
+          await log({step,selectionCheck});
+          await notify('Checking completion: repairing output field paths only. No browser action will be repeated.');
+          const fields=await model.repairSelectionFields({data:completion.data,fields:completion.selection.fields,error:selectionCheck.reason},signal);
+          // Repair may qualify keys only; it cannot change mappings, source, row, order or data.
+          const original=Object.entries(completion.selection.fields);
+          const entries=Object.entries(fields);
+          const used=new Set<string>();
+          const pathsOnly=entries.length===original.length&&original.every(([key,columns])=>{
+            const matches=entries.filter(([path,value])=>!used.has(path)&&(path===key||path.endsWith('.'+key))&&JSON.stringify(value)===JSON.stringify(columns));
+            if(matches.length!==1)return false;
+            used.add(matches[0][0]);return true;
+          });
+          if(pathsOnly)completion={...completion,selection:{...completion.selection,fields}};
+          await log({step,completionRepair:{accepted:pathsOnly,originalFields:action.selection?.fields,proposedFields:fields}});
+          selectionCheck=checkCompletionSelection(goal,completion,recordSources);
+        }
         await log({step,selectionCheck});
+        if(!selectionCheck.passed&&'fieldMismatch' in selectionCheck&&selectionCheck.fieldMismatch&&fieldCorrections<2) {
+          fieldCorrections++;
+          history.push({action:completion,error:selectionCheck.reason,correction:'This completion is NOT verified. Correct the field mapping or gather the requested detail-page evidence. Never map a description to an entire card Text column. Map only source columns that actually represent the output field; other extracted fields need current-page evidence and the final audit. Complete any requested navigation before finishing.'});
+          await log({step,fieldCorrection:fieldCorrections});
+          await notify(`Result not verified yet; gathering or correcting field evidence (${fieldCorrections}/2).`);
+          continue;
+        }
         if(!selectionCheck.passed){
           result={status:'failed',summary:`Not verified: ${selectionCheck.reason}`,runDir};
           break;
         }
-        const checks=await driver.verify(action,observation);
+        const checks=await driver.verify(completion,observation);
         await log({step,checks});
         if(checks.every(c=>c.passed)) {
-          const audit=await model.verifyGoal({goal,observation,recordSources,selectionCheck,history:history.slice(-16),claim:action},signal);
+          const audit=await model.verifyGoal({goal,observation,recordSources,selectionCheck,history:history.slice(-16),claim:completion},signal);
           await log({step,audit});
-          if(audit.verdict==='succeeded') {result={status:'succeeded',summary:action.summary,data:action.data,runDir};break;}
+          if(audit.verdict==='succeeded') {result={status:'succeeded',summary:completion.summary,data:completion.data,runDir};break;}
           if(audit.verdict==='blocked') {result={status:'blocked',summary:audit.reason,runDir};break;}
           history.push({action,error:audit.reason});continue;
         }
